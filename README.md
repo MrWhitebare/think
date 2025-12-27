@@ -6,3 +6,5 @@
 [书评怎么写](./documents/书评怎么写.md)
 
 [英语学习](./documents/英语如何学习.md)
+
+[我的2026计划](./documents/我的2026计划.md)
