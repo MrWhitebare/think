@@ -1,0 +1,111 @@
+import { createRequire } from 'module'
+import { defineAdditionalConfig, type DefaultTheme } from 'vitepress'
+
+const require = createRequire(import.meta.url)
+const pkg = require('vitepress/package.json')
+
+export default defineAdditionalConfig({
+
+    title: "我的思考",
+
+    description: '记录我的生活,思考我自己,记录灵感',
+
+    lang: 'zh-Hans',
+
+    themeConfig: {
+
+        nav: nav(),
+
+        sidebar: {
+            '/blogs/': {
+                base: '/blogs/',
+                items: sidebarBlogs()
+            },
+            '/books/':{
+                base: '/books/',
+                items: sidebarBooks()
+            }
+        },
+
+        editLink: {
+            pattern: 'https://github.com/MrWhitebare/think/edit/main/docs/:path',
+            text: '在 GitHub 上编辑此页面'
+        },
+
+        footer: {
+            message: '基于 MIT 许可发布',
+            copyright: '版权所有 © 2026-至今 Heisenberg'
+        },
+
+        docFooter: {
+            prev: '上一页',
+            next: '下一页'
+        },
+
+        outline: {
+            label: '页面导航'
+        },
+
+        lastUpdated: {
+            text: '最后更新于'
+        },
+
+        notFound: {
+            title: '页面未找到',
+            quote:
+                '但如果你不改变方向，并且继续寻找，你可能最终会到达你所前往的地方。',
+            linkLabel: '前往首页',
+            linkText: '带我回首页'
+        },
+
+        langMenuLabel: '多语言',
+        returnToTopLabel: '回到顶部',
+        sidebarMenuLabel: '菜单',
+        darkModeSwitchLabel: '主题',
+        lightModeSwitchTitle: '切换到浅色模式',
+        darkModeSwitchTitle: '切换到深色模式',
+        skipToContentLabel: '跳转到内容'
+
+    }
+
+})
+
+function nav(): DefaultTheme.NavItem[] {
+    return [
+        {
+            text: '博客',
+            link: '/blogs/write-comments',
+            activeMatch: '/blogs/'
+        },
+        {
+            text: '我读的书',
+            link: '/books/cosmos',
+            activeMatch: '/books/'
+        }
+    ]
+}
+
+function sidebarBlogs(): DefaultTheme.SidebarItem[] {
+    return [
+        {
+            text: "博客",
+            collapsed: true,
+            items: [
+                { text: '如何写书评', link: 'write-comments' },
+                { text: '2026年计划', link: 'plan-2026' },
+                { text: '学习英语', link: 'learn-english' },
+            ]
+        }
+    ]
+}
+
+function sidebarBooks():DefaultTheme.SidebarItem[]{
+    return [
+        {
+            text:'我读的书',
+            items:[
+                { text: '宇宙', link: 'cosmos' },
+            ]
+        }
+    ]
+}
