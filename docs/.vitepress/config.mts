@@ -14,6 +14,8 @@ export default defineConfig({
   cleanUrls: true,
   metaChunk: true,
 
+  base:'/think/',
+
   markdown:{
     math:true,
     image:{
