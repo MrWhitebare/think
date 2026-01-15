@@ -94,7 +94,8 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '如何写书评', link: 'write-comments' },
                 { text: '2026年计划', link: 'plan-2026' },
                 { text: '学习英语', link: 'learn-english' },
-                { text: '2025年度总结', link: 'annual-summary-2025'}
+                { text: '2025年度总结', link: 'annual-summary-2025'},
+                { text: '糟糕的一天', link: 'a-terrible-day' },
             ]
         }
     ]
