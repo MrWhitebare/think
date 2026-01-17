@@ -96,6 +96,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '学习英语', link: 'learn-english' },
                 { text: '2025年度总结', link: 'annual-summary-2025'},
                 { text: '糟糕的一天', link: 'a-terrible-day' },
+                { text: '关于我', link: 'about-me'},
             ]
         }
     ]
