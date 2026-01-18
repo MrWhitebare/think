@@ -98,6 +98,14 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '糟糕的一天', link: 'a-terrible-day' },
                 { text: '关于我', link: 'about-me'},
             ]
+        },
+        {
+            text: "英语",
+            collapsed: true,
+            items:[
+                {text:'语法俱乐部',link:'grammer-club'},
+                {text:'生词本',link:'vocabulary-notebook'},
+            ]
         }
     ]
 }
