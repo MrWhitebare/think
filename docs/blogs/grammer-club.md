@@ -48,7 +48,6 @@ I find the purse pretty 我觉得这个钱包很漂亮
 
 > 如果看到be动词后面没有补语，表示这个be动词并不是当做连缀动词使用。这时候be动词并不解释为「是」，而要解释为「存在 」，用在最单纯的 S+V 的句型中，是个不需要补语的完全动词。
 >
->
 > I am就得翻译成「我存在 」，am是个不需要补语的完全动词。
 
 ::: info 常见连缀动词
@@ -76,3 +75,34 @@ their very pretty garden
 形容词和名词可以省略，但是一定要表示出来它表达的意思，限定词不可省略
 
 these 这些 those 那些
+
+### 限定词分类
+
+- 前位限定词
+
+  | 单词          | 例句               | 意思 |
+  | ------------- | ------------------ | ---- |
+  | `all`       | all the girls      |      |
+  | `both`      | both those cars    |      |
+  | `half`      | half an hour       |      |
+  | `double`    | double the sum     |   总和的双倍   |
+  | `twice`     | twice my salary    |   我薪水的两倍   |
+  | `one-third` | one-third the time |   三分之一的时间   |
+  | `such`      | such a suprise     |   如此大的一个惊喜   |
+  | `what`      | what a day         |   这真是难忘的一天   |
+
+- 中位限定词
+
+限定词中出现频率最高的是中位限定词,**中位限定词不能一起使用**
+
+    - 冠词 (a、an、the)
+    - 指示性限定词 (this、that、these、those) 
+    - 不定限定词 (some、any、either)
+    - 否定限定词 (every、each)
+    - 所有格 (my、your、John's)
+
+- 后位限定词
+
+后位限定词用在名词词组中要排最后顺位。如果和前位限定词或中位限定词共同使用时，后位限定词一定要放在后面。
+
+后位限定词包括所有的数字、序数(first second third last)、以及many、much、little、few等。
