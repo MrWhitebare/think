@@ -97,6 +97,8 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '2025年度总结', link: 'annual-summary-2025'},
                 { text: '糟糕的一天', link: 'a-terrible-day' },
                 { text: '关于我', link: 'about-me'},
+                { text: '前端框架设计', link: 'synap-rs'},
+                { text: '流程引擎', link:'flow'},
             ]
         },
         {
