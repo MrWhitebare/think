@@ -99,6 +99,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '关于我', link: 'about-me'},
                 { text: '前端框架设计', link: 'synap-rs'},
                 { text: '流程引擎', link:'flow'},
+                { text: '随想', link:'casual-thoughts'},
             ]
         },
         {
@@ -107,6 +108,13 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
             items:[
                 {text:'语法俱乐部',link:'grammer-club'},
                 {text:'生词本',link:'vocabulary-notebook'},
+            ]
+        },
+        {
+            text: "编程人生",
+            collapsed: true,
+            items:[
+                {text:"前端性能优化",link:'performance-web'},
             ]
         }
     ]
