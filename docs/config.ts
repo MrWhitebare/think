@@ -115,6 +115,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
             collapsed: true,
             items:[
                 {text:"前端性能优化",link:'performance-web'},
+                {text:"记录一次iframe嵌入页面的问题",link:'same-site'},
             ]
         }
     ]
