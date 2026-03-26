@@ -100,6 +100,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '前端框架设计', link: 'synap-rs'},
                 { text: '流程引擎', link:'flow'},
                 { text: '随想', link:'casual-thoughts'},
+                { text: '剖析我', link:'analyze-me'},
             ]
         },
         {
