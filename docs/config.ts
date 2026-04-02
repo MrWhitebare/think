@@ -101,6 +101,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '流程引擎', link:'flow'},
                 { text: '随想', link:'casual-thoughts'},
                 { text: '剖析我', link:'analyze-me'},
+                { text: '控制的代价与生存的演化', link:'controlled' },
             ]
         },
         {
