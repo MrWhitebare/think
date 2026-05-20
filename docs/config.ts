@@ -119,6 +119,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 {text:"前端性能优化",link:'performance-web'},
                 {text:"记录一次iframe嵌入页面的问题",link:'same-site'},
                 {text:"Java学习计划",link:"javaer"},
+                {text:"PostgreSQL 外部表（Foreign Table）创建与问题排查指南",link:"pg-foreign"}
             ]
         }
     ]
