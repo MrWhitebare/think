@@ -104,6 +104,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 { text: '控制的代价与生存的演化', link:'controlled' },
                 { text: '阅读画像与内心对话', link:'reading-notes' },
                 { text: '缘起性空的一些思考', link:'universe'},
+                { text: '高压锅型人格情感管理与沟通指南', link: 'pressure-cooker' },
             ]
         },
         {
