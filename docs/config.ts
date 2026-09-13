@@ -124,6 +124,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 {text:"Java学习计划",link:"javaer"},
                 {text:"PostgreSQL 外部表（Foreign Table）创建与问题排查指南",link:"pg-foreign"},
                 {text:"记录一次并发问题",link:"concurrency"},
+                {text:"面试问题记录",link:"interview-questions"},
                 {text:"研发流程优化",link:"improving-r&d-process"},
             ]
         }
