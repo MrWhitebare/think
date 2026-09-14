@@ -1703,3 +1703,314 @@ SELECT FOR UPDATE、分布式锁
 
 > 这部分我会把重点放在简历里真正有把握的点上，比如 GiST 空间索引、随机 TTL、SpEL 的上下文绑定、工厂模式和策略模式的落地方式，以及 MPA 构建优化的测量方法。对那些边界不清的地方，我会尽量保持保守表述，不去主动扩展到自己并不完全熟悉的细节。
 
+## 第二十二个问题：SpringBoot 自动装配启动流程
+
+### 一、入口：`@SpringBootApplication`
+
+启动类上的 `@SpringBootApplication` 是一个复合注解，核心由三部分组成：
+
+```java
+@SpringBootConfiguration   // 本质是 @Configuration
+@EnableAutoConfiguration   // 开启自动配置的核心注解
+@ComponentScan             // 组件扫描
+```
+
+真正触发自动装配的是 `@EnableAutoConfiguration`。
+
+### 二、`@EnableAutoConfiguration` 做了什么
+
+这个注解上标注了：
+
+```java
+@Import(AutoConfigurationImportSelector.class)
+```
+
+`@Import` 会把 `AutoConfigurationImportSelector` 这个类导入到 Spring 容器的处理流程中，它实现了 `DeferredImportSelector` 接口（延迟导入选择器），会在所有 `@Configuration` 类处理完后再执行。
+
+### 三、`AutoConfigurationImportSelector` 的核心流程
+
+它的 `process()` / `selectImports()` 方法大致做以下几件事：
+
+1. **判断是否启用自动配置**（检查 `spring.boot.enableautoconfiguration` 属性，默认 true）
+2. **获取候选配置类列表**：通过 `SpringFactoriesLoader` 读取
+   - Spring Boot 2.x：`META-INF/spring.factories` 中 `EnableAutoConfiguration` 对应的类名列表
+   - Spring Boot 2.7+/3.x：改为读取 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 文件（纯文本，一行一个类名，性能更好）
+3. **去重、排除**（处理 `exclude` / `excludeName` 属性排除的类）
+4. **应用过滤器（AutoConfigurationImportFilter）**，其中最关键的是 `OnClassCondition`，提前根据 `@ConditionalOnClass` 过滤掉 classpath 中不存在依赖的配置类，减少后续加载开销
+5. 返回最终需要导入的自动配置类全限定名数组
+
+### 四、条件装配生效阶段
+
+被选中的自动配置类（如 `DataSourceAutoConfiguration`、`WebMvcAutoConfiguration`）会作为普通 `@Configuration` 类被加载，此时容器会逐一解析类和方法上的条件注解：
+
+- `@ConditionalOnClass` / `@ConditionalOnMissingClass`：classpath 是否存在某类
+- `@ConditionalOnBean` / `@ConditionalOnMissingBean`：容器中是否已有/没有某 Bean（常用于让用户自定义配置覆盖默认配置）
+- `@ConditionalOnProperty`：配置文件中某属性是否满足条件
+- `@ConditionalOnWebApplication`：是否是 Web 应用
+- `@ConditionalOnResource`、`@ConditionalOnExpression` 等
+
+只有条件全部满足的配置类/方法才会真正生效，把对应的 Bean 注册进容器。
+
+### 五、整体时序图
+
+```text
+main()
+ → SpringApplication.run()
+   → 准备 Environment
+   → 创建 ApplicationContext
+   → refresh()
+     → invokeBeanFactoryPostProcessors
+       → ConfigurationClassPostProcessor 处理 @Configuration
+         → 解析 @ComponentScan、@Import
+           → 触发 AutoConfigurationImportSelector(DeferredImportSelector)
+             → 读取 imports 文件/spring.factories
+             → OnClassCondition 等过滤器预过滤
+             → 生成最终自动配置类列表
+     → 逐个解析自动配置类上的 @Conditional 注解
+       → 条件满足的类中的 @Bean 方法注册到容器
+```
+
+### 六、关键点总结
+
+| 环节 | 作用 |
+| --- | --- |
+| `@Import(AutoConfigurationImportSelector.class)` | 装配入口 |
+| `DeferredImportSelector` | 保证在用户自定义配置之后处理，便于“覆盖默认” |
+| `spring.factories` / `*.imports` 文件 | 声明“有哪些候选自动配置类”（SPI 机制） |
+| `@ConditionalOnXxx` 系列注解 | 决定某个配置“是否真正生效” |
+| `spring-boot-autoconfigure` 依赖 | 提供了绝大多数官方自动配置类 |
+
+一句话概括：**SpringBoot 通过 SPI 机制批量加载候选自动配置类，再用一整套 `@Conditional` 条件注解按需筛选生效，实现“约定优于配置”的自动装配。**
+
+### 口播版
+
+> SpringBoot 的自动装配，本质上是从 `@SpringBootApplication` 入手，先通过 `@EnableAutoConfiguration` 触发自动配置入口，然后由 `AutoConfigurationImportSelector` 读取候选配置类列表，再经过 `@ConditionalOnXxx` 系列条件判断，只有满足条件的配置才会真正注册到容器里。重点记住一点：它是用 SPI 机制先拿到候选配置，再按条件筛选生效，最终实现“开箱即用”的自动装配。
+
+## 第二十三个问题：SQL 连接类型详解（附集合类比）
+
+### 一、先建立集合类比的直觉
+
+假设有两个集合（表）：
+
+- **A 表**（左表）：`{1, 2, 3}`
+- **B 表**（右表）：`{2, 3, 4}`
+
+把“能匹配上”的部分想象成两个圆的交集，SQL 连接本质上就是在操作这两个“圆”。
+
+```text
+     A表           B表
+   ┌───────┐   ┌───────┐
+   │ 1  2  │ 3 │ 2  4  │
+   │       │   │       │
+   └───────┘   └───────┘
+        └── 交集: 2,3 ──┘
+```
+
+### 二、内连接（INNER JOIN）= 交集 ∩
+
+**只保留两边都能匹配上的数据**，类比集合的 **交集**。
+
+```sql
+SELECT * FROM A INNER JOIN B ON A.id = B.id;
+```
+
+结果：只有 `{2, 3}`（A、B 里都有的部分）
+
+```text
+A: 1  [2] [3]
+B:    [2] [3]  4
+结果 = {2, 3}
+```
+
+### 三、左连接（LEFT JOIN）= 保留左边全集
+
+**左表全部保留，右表匹配不上的补 NULL**，类比集合中 **“以左边为基准，右边能配则配，不能配也不丢左边的数据”**。
+
+```sql
+SELECT * FROM A LEFT JOIN B ON A.id = B.id;
+```
+
+结果：`{1, 2, 3}` 全部保留，其中 1 对应的 B 字段是 NULL
+
+```text
+A: [1]  [2]  [3]
+B:  NULL [2]  [3]
+结果 = {1(B为空), 2, 3}
+```
+
+**集合表达式：A（全部） + (A∩B) 对应的 B 值**，可以理解为 **A ∪ (A∩B)**，但 A 本身已经包含交集了，所以更准确说是：**以 A 为主体，不删减任何 A 的行**。
+
+### 四、右连接（RIGHT JOIN）= 保留右边全集
+
+和左连接完全对称，**右表全部保留，左表匹配不上的补 NULL**。
+
+```sql
+SELECT * FROM A RIGHT JOIN B ON A.id = B.id;
+```
+
+结果：`{2, 3, 4}` 全部保留，4 对应的 A 字段是 NULL
+
+```text
+A: 1  [2] [3]  NULL
+B:    [2] [3]  [4]
+结果 = {2, 3, 4(A为空)}
+```
+
+> 💡 小技巧：`A RIGHT JOIN B` 等价于 `B LEFT JOIN A`，只是写法习惯不同，实际项目里很多规范会**只用 LEFT JOIN、不用 RIGHT JOIN**，把表顺序换一下即可，减少理解成本。
+
+### 五、外连接（FULL OUTER JOIN）= 并集 ∪
+
+**两边全部保留，谁匹配不上谁补 NULL**，类比集合的 **并集**。
+
+```sql
+SELECT * FROM A FULL OUTER JOIN B ON A.id = B.id;
+```
+
+结果：`{1, 2, 3, 4}` 全部出现
+
+```text
+A: [1] [2] [3]  NULL
+B:  NULL [2] [3]  [4]
+结果 = {1(B空), 2, 3, 4(A空)} = A ∪ B
+```
+
+> ⚠️ 注意：**MySQL 不支持 `FULL OUTER JOIN` 语法**，需要用 `LEFT JOIN UNION RIGHT JOIN` 模拟：
+
+```sql
+SELECT * FROM A LEFT JOIN B ON A.id = B.id
+UNION
+SELECT * FROM A RIGHT JOIN B ON A.id = B.id;
+```
+
+### 六、汇总对比表
+
+| 连接类型 | 集合类比 | 结果集 | 保留方 |
+| --- | --- | --- | --- |
+| INNER JOIN | 交集 A∩B | `{2, 3}` | 两边都要匹配上 |
+| LEFT JOIN | 左表全集 | `{1, 2, 3}` | 左表全保留 |
+| RIGHT JOIN | 右表全集 | `{2, 3, 4}` | 右表全保留 |
+| FULL OUTER JOIN | 并集 A∪B | `{1, 2, 3, 4}` | 两边全保留 |
+
+### 七、进阶：如何只取“差集”（某一边独有的数据）
+
+面试常考：**只要 A 中有、B 中没有的数据（A - B）**，不能直接用 INNER JOIN，要用 LEFT JOIN + 过滤 NULL：
+
+```sql
+SELECT * FROM A LEFT JOIN B ON A.id = B.id
+WHERE B.id IS NULL;
+```
+
+```text
+A: [1] 2  3       ← 只留 B 匹配不上的那部分
+结果 = {1}   (对应集合里的 A - B，即 A 的差集)
+```
+
+同理，**B 独有的数据（B - A）**：
+
+```sql
+SELECT * FROM A RIGHT JOIN B ON A.id = B.id
+WHERE A.id IS NULL;
+```
+
+结果：`{4}`
+
+**两边都独有的数据（对称差，A△B）**，即“只在一边出现”的部分，MySQL 里这样写：
+
+```sql
+SELECT * FROM A LEFT JOIN B ON A.id = B.id WHERE B.id IS NULL
+UNION
+SELECT * FROM A RIGHT JOIN B ON A.id = B.id WHERE A.id IS NULL;
+```
+
+结果：`{1, 4}`，正好对应集合里的 **对称差集**。
+
+### 八、一张图总结所有情况
+
+```text
+INNER JOIN:      A∩B         → 图中重叠部分
+LEFT JOIN:       A(全)       → 左圆整体 + 交集部分的 B 值
+RIGHT JOIN:      B(全)       → 右圆整体 + 交集部分的 A 值
+FULL OUTER JOIN: A∪B         → 两个圆整体
+LEFT - 交集:     A-B(差集)  → 左圆去掉重叠部分
+RIGHT - 交集:    B-A(差集)  → 右圆去掉重叠部分
+对称差集:        A△B         → 两圆都去掉重叠部分，只留两端
+```
+
+### 口播版
+
+> SQL 连接本质上就是在做集合运算。INNER JOIN 是交集，LEFT JOIN 是保留左表全部数据，RIGHT JOIN 是保留右表全部数据，FULL OUTER JOIN 是并集。面试里最容易被追问的，是怎么用 LEFT JOIN + IS NULL 来拿差集，或者怎么用 UNION 模拟 FULL OUTER JOIN。只要记住“左右表保留哪些行”，这几个连接就很容易区分。
+
+## 第二十四个问题：Java 中 final 关键字的作用
+
+`final` 的核心含义就是：**让某个东西不能再被修改、不能再被重写、不能再被继承**。在面试里可以统一这样回答：
+
+### 一、修饰变量：不能二次赋值
+
+```java
+final int age = 18;
+// age = 20; // 编译错误
+```
+
+- `final` 修饰基本类型变量时，值不能再变化
+- `final` 修饰引用类型变量时，引用地址不能再变，但对象内部属性仍然可以被修改
+
+```java
+final User user = new User();
+user.setName("Tom"); // 允许
+// user = new User(); // 不允许
+```
+
+### 二、修饰方法：不能被子类重写
+
+```java
+class Parent {
+    public final void test() {
+        System.out.println("父类方法");
+    }
+}
+
+class Child extends Parent {
+    // 编译错误：不能重写 final 方法
+    // public void test() {}
+}
+```
+
+适合用于限制子类行为，防止覆盖关键逻辑。
+
+### 三、修饰类：不能被继承
+
+```java
+public final class UserService {
+}
+```
+
+```java
+class MyService extends UserService {
+}
+```
+
+上面会直接编译失败。`String`、`Integer`、`Long` 等常见类都是 `final` 类。
+
+### 四、修饰成员变量：通常用于常量
+
+```java
+public class Config {
+    public static final String APP_NAME = "Ana";
+    public static final int MAX_SIZE = 100;
+}
+```
+
+这里的 `static final` 常用于定义类级常量，命名通常用大写字母和下划线。
+
+### 五、统一总结
+
+| 修饰对象 | 作用 |
+| --- | --- |
+| 变量 | 不能再次赋值 |
+| 方法 | 不能被子类重写 |
+| 类 | 不能被继承 |
+| `static final` 变量 | 常用于定义类级常量 |
+
+### 口播版
+
+> `final` 的核心作用就是限制“再修改”。如果修饰变量，就是不能再次赋值；如果修饰方法，就是不能被子类重写；如果修饰类，就是不能被继承；如果是 `static final`，通常就是定义常量。简单记忆就是：`final` 让某个东西在语义上变成“最终状态”。
