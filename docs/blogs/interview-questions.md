@@ -2014,3 +2014,889 @@ public class Config {
 ### 口播版
 
 > `final` 的核心作用就是限制“再修改”。如果修饰变量，就是不能再次赋值；如果修饰方法，就是不能被子类重写；如果修饰类，就是不能被继承；如果是 `static final`，通常就是定义常量。简单记忆就是：`final` 让某个东西在语义上变成“最终状态”。
+
+## 第二十五个问题：Docker 常用参数
+
+### 镜像相关
+
+```bash
+docker images # 查看本地镜像列表
+docker pull <image> # 拉取镜像
+docker build -t <name>:<tag> # 根据Dockerfile构建镜像
+docker rmi <image> # 删除镜像
+docker tag <image> <new_name> # 给镜像打标签
+docker push <image> # 推送镜像到仓库
+```
+
+### 容器相关
+
+```bash
+docker run -d -p 8080:80 --name mycontainer <image> # 后台运行容器并映射端口
+
+docker ps # 查看运行中的容器
+docker ps -a # 查看所有运行中的容器
+docker start/stop/restart <id> #启动/停止/重启容器
+docker rm <id> # 删除容器
+docker exec -it <id> bash # 进入容器交互式终端
+docker logs -f <id> # 查看容器日志(实时)
+docker inspect <id> # 查看容器详情日志
+```
+
+### 数据卷 & 网络
+
+```bash
+docker volume ls / create / rm # 管理数据卷
+docker network ls / create / rm # 管理网络
+docker run -v /host/path:/container/path <image> # 挂载目录
+```
+
+### Docker Compose
+
+```bash
+docker compose up -d # 启动所有服务
+docker compose down # 停止并删除容器
+docker compose logs -f # 查看日志
+docker compose ps # 查看服务状态
+```
+
+### 清理
+
+```bash
+docker system prune -a # 清理未使用的镜像、容器、网络等
+docker container prune # 清理已停止的容器
+```
+
+### 把 JAR 包打包成 Docker 镜像
+
+```bash
+# 第一阶段：构建
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml .
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+# 第二阶段：运行
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+```bash
+# 启动镜像
+docker run -v /host/config:/app/config -p 8080:8080 myapp:1.0
+```
+
+### docker 和 docker compose 有啥区别
+
+Docker：管理单个容器的工具（构建镜像、启动容器等）
+
+Docker Compose：管理多个容器组成的应用的工具，用一个 YAML 文件定义所有服务，一条命令统一启动/停止。
+
+### 端口映射
+
+因为容器是隔离的，容器内部的端口默认外部访问不到。必须显式做端口映射，外部流量才能"穿透"进容器内部。
+
+```bash
+-p 8080:80      # 外部8080 → 容器内80（常见于 web 服务）
+-p 3306:3306    # 外部3306 → 容器内3306（常见于 MySQL，端口保持一致方便记忆）
+-p 5000:5000    # 外部5000 → 容器内5000
+```
+
+### Docker run 常用参数
+
+### Docker run 常用参数（含全称）
+
+| 简写 | 全称 | 作用 |
+|---|---|---|
+| `-d` | `--detach` | 后台运行容器，不占用当前终端 |
+| `-p` | `--publish` | 端口映射：`宿主机端口:容器端口` |
+| `-v` | `--volume` | 挂载数据卷/目录，实现数据持久化 |
+| `--name` | （无简写） | 给容器指定一个名字，方便管理 |
+
+### 结合前面的例子
+
+```bash
+docker run -d -p 8080:80 -v /host/data:/app/data --name mycontainer myapp:1.0
+```
+
+## 第二十六个问题：Sentinel 熔断降级与限流（分流）
+
+Sentinel 是阿里开源的流量治理组件，核心能力包括**限流（流量控制）**、**熔断降级**、**系统自适应保护**和**热点参数限流**。
+
+### 一、引入依赖
+
+```xml
+<dependency>
+    <groupId>com.alibaba.csp</groupId>
+    <artifactId>sentinel-core</artifactId>
+    <version>1.8.6</version>
+</dependency>
+<!-- Spring Cloud Alibaba 项目直接使用这个 starter -->
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+</dependency>
+```
+
+### 二、限流（分流 / 流量控制）
+
+#### 1. 核心概念
+
+限流规则由 `FlowRule` 定义，控制维度包括 QPS、线程数、来源应用和关联资源等。
+
+#### 2. 硬编码方式
+
+```java
+private static void initFlowRules() {
+    List<FlowRule> rules = new ArrayList<>();
+    FlowRule rule = new FlowRule();
+    rule.setResource("getUserInfo");
+    rule.setGrade(RuleConstant.FLOW_GRADE_QPS);
+    rule.setCount(20);
+    rule.setLimitApp("default");
+    rule.setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_DEFAULT);
+    rules.add(rule);
+    FlowRuleManager.loadRules(rules);
+}
+```
+
+流控效果主要有三种：
+
+- `CONTROL_BEHAVIOR_DEFAULT`：快速失败，超过阈值立即拒绝
+- `CONTROL_BEHAVIOR_WARM_UP`：预热或冷启动，逐步放量
+- `CONTROL_BEHAVIOR_RATE_LIMITER`：匀速排队，平滑请求流量
+
+#### 3. 注解方式
+
+```java
+@SentinelResource(
+    value = "getUserInfo",
+    blockHandler = "handleBlock",
+    fallback = "handleFallback"
+)
+public User getUserInfo(String id) {
+    return userService.getById(id);
+}
+
+// 限流或熔断触发时调用
+public User handleBlock(String id, BlockException ex) {
+    return User.empty();
+}
+
+// 业务异常时调用
+public User handleFallback(String id, Throwable t) {
+    return User.empty();
+}
+```
+
+`blockHandler` 主要处理限流、熔断等 Sentinel 阻断异常，`fallback` 主要处理业务执行过程中的异常，两者职责不同。
+
+### 三、熔断降级
+
+Sentinel 熔断降级由 `DegradeRule` 定义，常见触发策略包括：
+
+| 策略 | 说明 | 适用场景 |
+| --- | --- | --- |
+| 慢调用比例（`SLOW_REQUEST_RATIO`） | RT 超过阈值的请求比例超限后熔断 | 下游响应变慢，可能拖垮系统 |
+| 异常比例（`ERROR_RATIO`） | 异常请求占比超限后熔断 | 下游服务错误率升高 |
+| 异常数（`ERROR_COUNT`） | 统计窗口内异常数量超过阈值后熔断 | 短时间内异常暴增 |
+
+```java
+private static void initDegradeRules() {
+    List<DegradeRule> rules = new ArrayList<>();
+
+    DegradeRule rule = new DegradeRule("getUserInfo");
+    rule.setGrade(RuleConstant.DEGRADE_GRADE_RT);
+    rule.setCount(200);                 // RT 阈值：200ms
+    rule.setSlowRatioThreshold(0.5);    // 慢调用比例超过 50%
+    rule.setMinRequestAmount(5);        // 最小请求数
+    rule.setStatIntervalMs(1000);       // 统计窗口 1 秒
+    rule.setTimeWindow(10);             // 熔断持续 10 秒
+
+    rules.add(rule);
+    DegradeRuleManager.loadRules(rules);
+}
+```
+
+熔断状态通常可以理解为：**CLOSED（正常）→ OPEN（熔断，直接拒绝）→ HALF_OPEN（半开，放行少量请求探测）→ 恢复 CLOSED 或重新 OPEN**。
+
+### 四、手动包裹资源
+
+不使用注解时，可以通过 `SphU.entry()` 手动保护资源：
+
+```java
+Entry entry = null;
+try {
+    entry = SphU.entry("getUserInfo");
+    // 业务逻辑
+} catch (BlockException e) {
+    return fallbackResult();
+} finally {
+    if (entry != null) {
+        entry.exit();
+    }
+}
+```
+
+### 五、Spring Cloud 中使用 Sentinel
+
+```yaml
+spring:
+  cloud:
+    sentinel:
+      transport:
+        dashboard: localhost:8858
+        port: 8719
+      eager: true
+      filter:
+        enabled: true
+```
+
+通过 Sentinel 控制台可以动态配置：
+
+- 流控规则：QPS、线程数
+- 降级规则：RT、异常比例、异常数
+- 热点参数规则：针对具体参数值限流
+- 系统规则：根据整体负载、CPU、RT 等指标保护系统
+
+生产环境不能只依赖内存中的硬编码规则，否则应用重启后规则会丢失。通常需要接入 Nacos、ZooKeeper 等配置中心做规则持久化。
+
+### 六、常见组合实践
+
+1. **网关层限流**：结合 Spring Cloud Gateway，按路由或 API 分组限流，防止突发流量打垮后端。
+2. **服务间调用熔断**：结合 Feign 或 RestTemplate，下游异常率过高时自动熔断，避免级联故障。
+3. **热点参数限流**：例如秒杀场景下只对热点商品 ID 单独限流，而不是限制整个接口。
+
+### 七、Sentinel Gateway 网关限流
+
+Gateway 是 WebFlux 响应式架构，需要引入网关专用适配包，不能直接使用普通 Servlet Web 过滤器：
+
+```xml
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-alibaba-sentinel-gateway</artifactId>
+</dependency>
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+</dependency>
+```
+
+```yaml
+spring:
+  cloud:
+    sentinel:
+      transport:
+        dashboard: localhost:8858
+        port: 8719
+      eager: true
+      filter:
+        enabled: false
+```
+
+网关层可以按路由 ID 设置限流规则：
+
+```java
+@Configuration
+public class GatewayConfig {
+
+    @PostConstruct
+    public void init() {
+        Set<GatewayFlowRule> rules = new HashSet<>();
+
+        rules.add(new GatewayFlowRule("user-service-route")
+            .setCount(5)
+            .setIntervalSec(1)
+            .setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_DEFAULT));
+
+        rules.add(new GatewayFlowRule("order-service-route")
+            .setCount(10)
+            .setIntervalSec(1)
+            .setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_RATE_LIMITER)
+            .setMaxQueueingTimeoutMs(500));
+
+        GatewayRuleManager.loadRules(rules);
+    }
+}
+```
+
+也可以用 `ApiDefinition` 按具体 API 分组限流，或者通过 `GatewayParamFlowItem` 按客户端 IP 等参数限流。
+
+```java
+GatewayParamFlowItem item = new GatewayParamFlowItem()
+    .setParseStrategy(SentinelGatewayConstants.PARAM_PARSE_STRATEGY_CLIENT_IP);
+
+GatewayFlowRule rule = new GatewayFlowRule("user-service-route")
+    .setCount(2)
+    .setIntervalSec(1)
+    .setParamItem(item);
+```
+
+限流后建议自定义返回结果，而不是直接返回默认错误页面：
+
+```java
+BlockRequestHandler handler = (exchange, throwable) -> {
+    Map<String, Object> result = new HashMap<>();
+    result.put("code", 429);
+    result.put("message", "请求过于频繁，请稍后再试");
+
+    return ServerResponse.status(HttpStatus.TOO_MANY_REQUESTS)
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(BodyInserters.fromValue(result));
+};
+GatewayCallbackManager.setBlockHandler(handler);
+```
+
+### 八、关键注意点
+
+| 问题 | 说明 |
+| --- | --- |
+| 引错依赖 | Gateway 必须使用 `sentinel-gateway` 专用适配包 |
+| 规则不持久化 | 硬编码规则重启后会丢失，生产环境接入配置中心 |
+| 端口冲突 | Sentinel Dashboard 端口和网关服务端口是两回事 |
+| 默认返回不友好 | 应自定义 `BlockRequestHandler` 返回统一 JSON |
+| 只做限流不做降级 | 下游故障时仍可能产生级联调用，需要结合熔断和 fallback |
+
+### 口播版
+
+> Sentinel 主要解决限流、熔断降级和系统保护问题。限流可以按 QPS、线程数、来源或热点参数控制，常用 `FlowRule` 或 `@SentinelResource`；熔断降级主要根据慢调用比例、异常比例和异常数触发，避免下游故障造成级联雪崩。实际项目里通常在网关层按路由限流，在服务间调用处做熔断和 fallback，并通过 Sentinel Dashboard 动态配置规则，生产环境再接入 Nacos 等配置中心做持久化。网关是 WebFlux 架构，还要使用 `sentinel-gateway` 专用适配包，并自定义限流后的 JSON 返回结果。
+
+## 第二十八个问题：Java 线程池的使用
+
+### 一、为什么使用线程池
+
+如果每个任务都直接 `new Thread()`，线程需要频繁创建和销毁，开销较大，而且线程数量不可控，可能耗尽系统资源。线程池可以复用线程、控制并发数量、统一管理任务，并通过队列和拒绝策略提供过载保护。
+
+### 二、核心实现：`ThreadPoolExecutor`
+
+Java 线程池的核心实现是 `ThreadPoolExecutor`，`Executors` 提供的快捷方法本质上也是对它的封装。生产环境通常建议手动创建线程池，明确指定参数。
+
+```java
+ThreadPoolExecutor executor = new ThreadPoolExecutor(
+    2,                              // corePoolSize
+    4,                              // maximumPoolSize
+    60,                             // keepAliveTime
+    TimeUnit.SECONDS,
+    new LinkedBlockingQueue<>(10),  // workQueue
+    Executors.defaultThreadFactory(),
+    new ThreadPoolExecutor.CallerRunsPolicy()
+);
+```
+
+主要参数如下：
+
+- `corePoolSize`：核心线程数，默认会长期保留
+- `maximumPoolSize`：最大线程数，队列满后才会继续创建非核心线程
+- `keepAliveTime`：非核心线程空闲多久后被回收
+- `workQueue`：任务等待队列，常见有 `ArrayBlockingQueue`、`LinkedBlockingQueue`、`SynchronousQueue`
+- `threadFactory`：用于统一设置线程名称，方便日志和问题排查
+- `RejectedExecutionHandler`：线程池和队列都满时的拒绝策略
+
+常见拒绝策略：
+
+- `AbortPolicy`：直接抛出异常，默认策略
+- `CallerRunsPolicy`：由提交任务的线程执行，能够起到一定的限流作用
+- `DiscardPolicy`：直接丢弃任务
+- `DiscardOldestPolicy`：丢弃队列中最早进入的任务
+
+### 三、任务提交流程
+
+提交任务时，线程池不是先扩容到最大线程数，而是按下面的顺序处理：
+
+1. 当前线程数小于 `corePoolSize`，创建核心线程执行任务
+2. 核心线程已达到上限，将任务放入工作队列
+3. 工作队列已满，继续创建线程，直到达到 `maximumPoolSize`
+4. 线程数和队列都达到上限，执行拒绝策略
+
+这是线程池面试中最容易被问到的执行流程。
+
+### 四、基本使用
+
+```java
+public class ThreadPoolDemo {
+    public static void main(String[] args) {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+            2, 4, 60, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(10),
+            new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+
+        for (int i = 0; i < 20; i++) {
+            int taskId = i;
+            executor.execute(() ->
+                System.out.println(Thread.currentThread().getName()
+                    + " 执行任务 " + taskId)
+            );
+        }
+
+        executor.shutdown();
+    }
+}
+```
+
+提交任务主要有两种方式：
+
+```java
+// 无返回值
+executor.execute(() -> doSomething());
+
+// 有返回值，可以通过 Future 获取结果
+Future<Integer> future = executor.submit(() -> 1 + 1);
+Integer result = future.get();
+```
+
+`execute` 适合不需要返回值的任务，`submit` 会把任务包装成 `Future`，可以获取返回值，也可以感知执行异常。
+
+### 五、线程池大小如何设置
+
+- **CPU 密集型任务**：线程主要用于计算，通常可以设置为 CPU 核数加 1
+- **IO 密集型任务**：线程经常等待网络或磁盘，可以设置为 CPU 核数的 2 倍或更高
+
+这只是经验值，实际还要结合任务耗时、IO 等待比例、队列长度和压测结果调整，不能只套公式。
+
+### 六、为什么不推荐直接使用 `Executors`
+
+`Executors.newFixedThreadPool()` 默认使用无界队列，任务过多时可能不断堆积；`newCachedThreadPool()` 的最大线程数接近无限，突发流量下可能创建大量线程。生产环境更推荐手动创建 `ThreadPoolExecutor`，显式设置线程数、队列容量、线程名称和拒绝策略。
+
+### 七、Spring Boot 中使用线程池
+
+Spring 中可以使用 `ThreadPoolTaskExecutor`，它底层仍然是 `ThreadPoolExecutor`，但和 `@Async`、Spring 容器生命周期结合得更好。
+
+```java
+@Configuration
+public class ThreadPoolConfig {
+
+    @Bean("myTaskExecutor")
+    public ThreadPoolTaskExecutor myTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(200);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("my-task-");
+        executor.setRejectedExecutionHandler(
+            new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+}
+```
+
+配合 `@Async` 使用时，需要启用异步能力，并明确指定线程池：
+
+```java
+@SpringBootApplication
+@EnableAsync
+public class Application {
+}
+
+@Service
+public class NotificationService {
+
+    @Async("myTaskExecutor")
+    public void sendEmail(String to) {
+        // 耗时操作
+    }
+
+    @Async("myTaskExecutor")
+    public CompletableFuture<String> sendEmailWithResult(String to) {
+        return CompletableFuture.completedFuture("sent to " + to);
+    }
+}
+```
+
+`@Async` 方法通常需要是 `public`，并且必须通过 Spring 代理调用。同一个类内部直接调用自己的异步方法，会绕过代理，导致 `@Async` 失效。
+
+简单场景也可以通过配置文件设置：
+
+```yaml
+spring:
+  task:
+    execution:
+      pool:
+        core-size: 8
+        max-size: 16
+        queue-capacity: 200
+        keep-alive: 60s
+      thread-name-prefix: async-task-
+```
+
+### 八、任务优先级
+
+`ThreadPoolExecutor` 默认使用 FIFO 队列，没有优先级概念。如果确实需要优先级，可以使用 `PriorityBlockingQueue`，让任务实现 `Comparable`，或者拆分成高优先级和普通任务两个线程池。
+
+```java
+public class PriorityTask implements Runnable, Comparable<PriorityTask> {
+    private final int priority;
+    private final Runnable task;
+
+    public PriorityTask(int priority, Runnable task) {
+        this.priority = priority;
+        this.task = task;
+    }
+
+    @Override
+    public void run() {
+        task.run();
+    }
+
+    @Override
+    public int compareTo(PriorityTask other) {
+        return Integer.compare(priority, other.priority);
+    }
+}
+```
+
+需要注意：`PriorityBlockingQueue` 默认是无界队列，队列通常不会触发“已满”状态，因此 `maximumPoolSize` 和拒绝策略可能不会按预期生效，也要注意任务无限堆积导致内存问题。优先级只影响排队任务，已经开始执行的任务不能被插队。
+
+### 九、线程池监控与关闭
+
+可以重点监控以下指标：
+
+- 当前线程数、核心线程数和最大线程数
+- 活跃线程数 `getActiveCount()`
+- 队列中的任务数量 `getQueue().size()`
+- 已完成任务数量 `getCompletedTaskCount()`
+- 拒绝任务次数、任务执行耗时和异常数量
+
+线程池不再使用时要及时关闭：
+
+```java
+executor.shutdown();
+executor.awaitTermination(10, TimeUnit.SECONDS);
+executor.shutdownNow();
+```
+
+一般优先使用 `shutdown()` 优雅关闭，等待已提交任务执行完成；只有在需要快速停止时，才考虑 `shutdownNow()`，并且任务代码要正确处理中断信号。
+
+### 口播版
+
+> 线程池主要是为了复用线程、控制并发数量和保护系统资源。Java 里核心实现是 `ThreadPoolExecutor`，任务提交时会先创建核心线程，再放入队列，队列满了以后才创建非核心线程，最后才执行拒绝策略。生产环境我会手动配置线程数、有限队列、线程名称和拒绝策略，避免直接使用 `Executors` 带来的无界队列或无限创建线程问题。Spring Boot 中可以用 `ThreadPoolTaskExecutor` 配合 `@Async`，同时要注意代理调用、线程池隔离、监控队列堆积和应用关闭时优雅停机。
+
+## 第二十七个问题：Vue 2 核心概念
+
+### 一、基本心智模型
+
+如果有 React 基础，可以这样理解 Vue 2：React 更偏向“用 JavaScript 写 UI”，通过 JSX 组织视图；Vue 2 更偏向“用模板写 UI”，通过模板指令组织视图。
+
+两者的响应式机制也不同：React 通常通过 `setState` 或状态 Hook 触发更新，Vue 2 基于 `Object.defineProperty` 做依赖追踪，修改响应式数据后会自动更新视图。
+
+### 二、Vue 2 组件结构
+
+Vue 2 默认使用选项式 API，单文件组件通常由 `template`、`script` 和 `style` 三部分组成：
+
+```vue
+<template>
+    <div>
+        <p>{{ count }}</p>
+        <button @click="increment">+1</button>
+        <child-comp :msg="count" @custom-event="handleEvent" />
+    </div>
+</template>
+
+<script>
+export default {
+    components: { ChildComp },
+    props: ['initialCount'],
+    data() {
+        return { count: this.initialCount }
+    },
+    computed: {
+        doubled() {
+            return this.count * 2
+        }
+    },
+    watch: {
+        count(newVal, oldVal) {
+            // 处理副作用
+        }
+    },
+    methods: {
+        increment() {
+            this.count++
+        }
+    },
+    mounted() {
+        // 组件挂载完成
+    }
+}
+</script>
+
+<style scoped>
+/* 当前组件样式只在当前组件范围内生效 */
+</style>
+```
+
+### 三、React 与 Vue 2 概念对照
+
+| React | Vue 2 | 说明 |
+| --- | --- | --- |
+| `useState` / `this.state` | `data()` | 返回的数据会自动变成响应式 |
+| `setState` | 直接赋值 `this.count = 1` | Vue 2 不需要显式调用更新函数 |
+| `useMemo` | `computed` | 有缓存，依赖不变时不会重复计算 |
+| `useEffect` | `watch` + 生命周期钩子 | 通过监听数据和生命周期处理副作用 |
+| JSX `{expr}` | `{{ expr }}` | 模板插值 |
+| `onClick={fn}` | `@click="fn"` | `v-on` 的简写 |
+| `value={x}` + `onChange` | `v-model="x"` | 表单双向绑定 |
+| 条件表达式渲染 | `v-if="cond"` | 条件渲染指令 |
+| `.map()` 渲染列表 | `v-for="item in list"` | 列表渲染，需要配合 `:key` |
+| Context API | `provide` / `inject` | 跨层级传递数据 |
+| Props | `props` | 父组件向子组件传递数据，仍然是单向数据流 |
+| 回调函数传递事件 | `this.$emit('event', data)` | 子组件通过事件向父组件传递数据 |
+| `className` / `classnames` | `:class` | 内置对象和数组写法 |
+
+### 四、Vue 2 特有的核心概念
+
+- **指令**：`v-if`、`v-for`、`v-show`、`v-model` 等，把常见视图逻辑直接写在模板中
+- **`v-model` 双向绑定**：表单输入可以自动同步数据，减少手动编写事件处理代码
+- **单文件组件**：`.vue` 文件把模板、逻辑和样式组织在一起，结构清晰
+- **自动响应式更新**：修改 `this.xxx` 后视图会自动更新，不需要手动触发渲染
+- **Mixins**：Vue 2 常用的逻辑复用方式，但容易产生命名冲突和来源不清的问题
+- **`scoped` 样式**：通过编译处理，让组件样式尽量只作用于当前组件
+
+### 五、Vue 2 响应式的常见坑
+
+Vue 2 基于 `Object.defineProperty`，初始化时会为已有属性建立响应式。当运行时给对象新增属性，或者直接通过下标修改数组元素时，可能无法触发视图更新：
+
+```javascript
+// 可能无法触发响应式更新
+this.user.age = 18
+this.list[0] = newValue
+
+// 推荐写法
+this.$set(this.user, 'age', 18)
+this.$set(this.list, 0, newValue)
+```
+
+也可以使用 Vue 能够重写拦截的数组方法，例如 `push`、`pop`、`shift`、`unshift`、`splice`、`sort` 和 `reverse`。
+
+### 六、生命周期对照
+
+| React Class | Vue 2 | 说明 |
+| --- | --- | --- |
+| `constructor` | `beforeCreate` / `created` | Vue 中通常在 `created` 处理数据初始化后的逻辑 |
+| `componentDidMount` | `mounted` | 组件挂载完成 |
+| `componentDidUpdate` | `updated` | 组件更新完成 |
+| `componentWillUnmount` | `beforeDestroy` / `destroyed` | 组件销毁前和销毁后 |
+
+### 七、面试中可以直接这样回答
+
+> Vue 2 默认使用选项式 API，组件主要由 template、script 和 style 组成。它和 React 一样支持 props 单向数据流、组件化和生命周期，但 Vue 2 主要通过模板指令组织视图，状态放在 data 中，修改状态可以直接赋值，computed 用于带缓存的派生数据，watch 和生命周期钩子用于处理副作用。Vue 2 的响应式基于 Object.defineProperty，常见注意点是新增对象属性或直接修改数组下标时，要使用 Vue.set 或响应式数组方法。
+
+### 口播版
+
+> 如果有 React 基础，可以把 Vue 2 理解成：React 更偏用 JavaScript 和 JSX 写 UI，Vue 2 更偏用模板和指令写 UI。Vue 2 里的 data 类似 state，computed 类似带缓存的 useMemo，watch 和生命周期钩子用于处理副作用，子组件通过 props 接收数据，通过 `$emit` 通知父组件。它最大的特点是基于 Object.defineProperty 做自动响应式更新，但新增对象属性和直接修改数组下标时要使用 `$set`，这是面试中比较容易被问到的坑。
+
+等价于（用全称写法）：
+
+```bash
+docker run --detach --publish 8080:80 --volume /host/data:/app/data --name mycontainer myapp:1.0
+```
+
+---
+
+| 简写 | 全称 | 作用 |
+|---|---|---|
+| `-e` | `--env` | 设置环境变量 |
+| `-it` | `-i --interactive` + `-t --tty` | 交互式终端 |
+| `--rm` | （无简写，本身就是全称） | 容器停止后自动删除 |
+| `-w` | `--workdir` | 设置容器内的工作目录 |
+| `-m` | `--memory` | 限制容器可用内存 |
+| `--network` | （无简写，本身就是全称） | 指定容器连接的网络 |
+
+## 第二十九个问题：Vuex 和 Vue Router
+
+### 一、Vuex：集中式状态管理
+
+Vuex 是 Vue 生态中的状态管理工具，可以类比 React 生态中的 Redux。它把多个组件共享的状态集中放到一个 `store` 中，组件通过统一的方式读取和修改状态。
+
+#### 1. 核心概念对照
+
+| Redux | Vuex | 说明 |
+| --- | --- | --- |
+| `store` | `store` | 全局唯一的状态容器 |
+| `state` | `state` | 全局数据源 |
+| `reducer` | `mutations` | 唯一能同步修改 `state` 的地方 |
+| `action` + thunk / saga | `actions` | 处理异步逻辑，再提交 mutation |
+| selector / `useSelector` | `getters` | 类似 `computed`，用于派生数据 |
+| `dispatch(action)` | `dispatch('actionName')` | 触发 action |
+| reducer 更新状态 | `commit('mutationName')` | 触发 mutation 同步修改状态 |
+
+#### 2. 基本结构
+
+```javascript
+// store.js
+export default new Vuex.Store({
+    state: {
+        count: 0
+    },
+    getters: {
+        doubled(state) {
+            return state.count * 2
+        }
+    },
+    mutations: {
+        // 唯一能直接修改 state 的地方，必须保持同步
+        increment(state, payload) {
+            state.count += payload
+        }
+    },
+    actions: {
+        // 可以执行异步逻辑，完成后再 commit
+        async incrementAsync({ commit }, payload) {
+            await someApiCall()
+            commit('increment', payload)
+        }
+    }
+})
+```
+
+组件中使用：
+
+```javascript
+export default {
+    computed: {
+        count() {
+            return this.$store.state.count
+        },
+        doubled() {
+            return this.$store.getters.doubled
+        }
+    },
+    methods: {
+        add() {
+            this.$store.dispatch('incrementAsync', 1)
+        }
+    }
+}
+```
+
+#### 3. `mutations` 和 `actions` 为什么要分开
+
+- `mutations` 必须同步执行，是唯一合法修改 `state` 的入口，便于 Vue Devtools 记录每一次状态变化
+- `actions` 可以处理异步逻辑，但不能直接修改 `state`，只能通过 `commit` 提交 mutation
+- 组件通常通过 `dispatch` 调用 action，通过 `commit` 调用 mutation
+
+Redux 中的 reducer 也要求纯函数和同步更新，异步逻辑通常交给 thunk 或 saga。Vuex 把这套规则直接拆成了 `mutations` 和 `actions` 两个明确的概念。
+
+#### 4. 辅助函数
+
+当组件需要使用多个状态或 action 时，可以用辅助函数减少样板代码：
+
+```javascript
+import { mapState, mapGetters, mapActions, mapMutations } from 'vuex'
+
+export default {
+    computed: {
+        ...mapState(['count']),
+        ...mapGetters(['doubled'])
+    },
+    methods: {
+        ...mapActions(['incrementAsync']),
+        ...mapMutations(['increment'])
+    }
+}
+```
+
+模块化项目中还可以通过 `namespaced: true` 给模块划分命名空间，避免不同模块之间的 mutation、action 和 getter 重名。
+
+### 二、Vue Router：前端路由管理
+
+Vue Router 可以类比 React Router，负责根据 URL 匹配组件、处理页面导航、嵌套路由、动态参数和路由守卫。
+
+#### 1. 基本概念对照
+
+| React Router | Vue Router | 说明 |
+| --- | --- | --- |
+| `<BrowserRouter>` | `new VueRouter({ mode: 'history' })` | 创建路由实例 |
+| `<Route path="..." element={...}>` | `routes: [{ path, component }]` | 声明路由映射 |
+| `<Link to="/xxx">` | `<router-link to="/xxx">` | 声明式导航 |
+| `useNavigate()` | `this.$router.push('/xxx')` | 编程式导航 |
+| `useParams()` | `this.$route.params` | 获取动态参数 |
+| `<Outlet />` | `<router-view>` | 渲染匹配的子路由组件 |
+| `useLocation()` | `this.$route` | 获取当前路由信息 |
+
+#### 2. 基本配置
+
+```javascript
+// router.js
+const router = new VueRouter({
+    mode: 'history',
+    routes: [
+        { path: '/', component: Home },
+        { path: '/user/:id', component: User },
+        {
+            path: '/admin',
+            component: AdminLayout,
+            children: [
+                { path: 'settings', component: Settings }
+            ]
+        }
+    ]
+})
+```
+
+模板中使用：
+
+```vue
+<template>
+    <div>
+        <router-link to="/user/123">去用户页</router-link>
+        <router-view />
+    </div>
+</template>
+```
+
+组件中跳转和获取参数：
+
+```javascript
+export default {
+    computed: {
+        userId() {
+            return this.$route.params.id
+        }
+    },
+    methods: {
+        goHome() {
+            this.$router.push('/')
+        }
+    }
+}
+```
+
+#### 3. 路由模式和常见能力
+
+- `hash` 模式使用 URL 中的 `#`，不需要服务器额外配置，兼容性较好
+- `history` 模式 URL 更干净，但服务器需要把未知路径回退到 `index.html`
+- 动态路由通过 `/user/:id` 定义，参数从 `this.$route.params` 获取
+- 嵌套路由通过 `children` 配置，并在父组件中使用 `<router-view>` 占位
+- 可以通过 `beforeEach`、`beforeEnter` 等导航守卫实现登录校验、权限控制和页面跳转拦截
+
+```javascript
+router.beforeEach((to, from, next) => {
+    if (to.meta.requiresAuth && !isLogin()) {
+        next('/login')
+        return
+    }
+    next()
+})
+```
+
+#### 4. Vue Router 与 React Router 的主要区别
+
+React Router v6 更偏向组件化路由，路由可以直接写在 JSX 组件树中；Vue Router 更偏向集中式配置，路由表通常独立维护。Vue Router 的嵌套路由使用 `children` 和 `<router-view>`，导航则通过 `router-link` 或 `this.$router.push` 完成。
+
+### 三、面试中可以直接这样回答
+
+> Vuex 可以类比 Redux，主要负责全局状态管理。state 保存数据，getters 负责派生数据，mutations 是唯一同步修改 state 的地方，actions 负责异步逻辑，执行完成后通过 commit 提交 mutation。项目复杂时可以用 modules 和 namespaced 拆分状态。Vue Router 则负责前端路由，路由表通过配置对象集中声明，`router-link` 用于声明式导航，`this.$router.push` 用于编程式导航，`this.$route.params` 获取动态参数，嵌套路由通过 children 和 router-view 实现，路由守卫用于登录和权限控制。
+
+### 口播版
+
+> Vuex 主要解决跨组件共享状态的问题，核心是 state、getters、mutations 和 actions：mutations 同步改状态，actions 处理异步逻辑，再通过 commit 提交。Vue Router 主要负责页面路由，路由集中配置，页面跳转用 router-link 或 this.$router.push，动态参数从 this.$route.params 获取，嵌套路由通过 children 和 router-view 实现，登录鉴权可以放在全局路由守卫里。
+| `-u` | `--user` | 指定运行容器的用户 |
+| `-h` | `--hostname` | 设置容器的主机名 |
