@@ -126,6 +126,7 @@ function sidebarBlogs(): DefaultTheme.SidebarItem[] {
                 {text:"记录一次并发问题",link:"concurrency"},
                 {text:"面试问题记录",link:"interview-questions"},
                 {text:"JavaScript 面试题记录",link:"javascript-interview-questions"},
+                {text:"项目经历面试口述稿",link:"project-experience-interview-script"},
                 {text:"LeetCode 刷题记录",link:"leetcode-notes"},
                 {text:"算法基础概念与技巧",link:"algorithm-concepts"},
                 {text:"研发流程优化",link:"improving-r&d-process"},
