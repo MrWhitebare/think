@@ -9,24 +9,31 @@ lang: zh
 
 ## 一、`this` 的指向如何确定？
 
-普通函数的 `this` 通常由**调用方式**决定：
+普通函数的 `this` 由**调用方式**决定，不是由函数定义的位置决定。判断时可以按下面的规则：
 
-1. `obj.fn()`：`this` 指向调用它的 `obj`。
-2. `fn()`：严格模式下 `this` 是 `undefined`；非严格模式下通常指向全局对象。
-3. `new Fn()`：`this` 指向新创建的实例。
-4. `call`、`apply`、`bind`：显式指定 `this`。
+1. **`new` 调用**：`new Fn()` 中，`this` 指向新创建的实例。
+2. **显式指定**：`call`、`apply` 立即调用函数并指定 `this`；`bind` 返回一个绑定了 `this` 的新函数。
+3. **方法调用**：`obj.fn()` 中，`this` 指向调用方法的对象 `obj`。看调用表达式中函数前面的对象，而不是方法定义在哪个对象上。
+4. **普通函数调用**：`fn()` 没有明确接收者。严格模式下 `this` 是 `undefined`；非严格模式下 `null` / `undefined` 会指向全局对象。
 
-箭头函数没有自己的 `this`，会沿用定义时外层作用域的 `this`，因此不能通过 `call`、`apply` 或 `bind` 改变它。
+对普通函数来说，常见优先级可以记为：**`new` > 显式绑定 > 隐式绑定 > 默认绑定**。箭头函数是例外：它没有自己的 `this`，而是使用定义时外层作用域的 `this`，`call`、`apply`、`bind` 都不能改变它。
 
 ```js
 const user = {
   name: 'Lin',
+  say() {
+    return this.name;
+  },
   sayLater() {
     setTimeout(() => {
       console.log(this.name); // Lin
     }, 0);
   },
 };
+
+user.say(); // "Lin"：方法调用，this 是 user
+const say = user.say;
+say(); // 严格模式下是 undefined；非严格模式下 this 是全局对象
 ```
 
 ### `call`、`apply`、`bind` 有什么区别？
@@ -52,6 +59,46 @@ greetLin('!'); // "你好, Lin!"
 ```
 
 注意：箭头函数没有自己的 `this`，所以 `call`、`apply` 和 `bind` 都不能改变箭头函数的 `this`。
+
+#### 常见易错点
+
+**方法被取出后，调用方式变了，`this` 也可能改变。**需要保留对象作为接收者时，可以用 `bind`：
+
+```js
+const user = {
+  name: 'Lin',
+  say() {
+    return this.name;
+  },
+};
+
+const boundSay = user.say.bind(user);
+boundSay(); // "Lin"
+```
+
+**`bind` 的绑定通常不能被后续 `call` / `apply` 覆盖；但用 `new` 调用绑定函数时，`this` 指向新实例。**原函数若可构造，绑定函数也可用作构造函数：
+
+```js
+function Person(name) {
+  this.name = name;
+}
+
+const BoundPerson = Person.bind({ name: '忽略的对象' }, 'Lin');
+const person = new BoundPerson();
+person.name; // "Lin"
+person instanceof Person; // true
+```
+
+**箭头函数不会因对象方法语法而自动绑定到该对象。**下面的箭头函数使用外层作用域的 `this`，而不是 `user`：
+
+```js
+const user = {
+  name: 'Lin',
+  say: () => this.name,
+};
+```
+
+因此，需要动态接收者的方法通常使用普通方法语法；需要继承外层 `this` 的回调则常用箭头函数。
 
 ## 二、`==` 和 `===` 有什么区别？
 
