@@ -1293,3 +1293,286 @@ self.onmessage = (event) => {
 - **环境与安全限制**：通常要求同源脚本（或满足跨域策略），并受浏览器安全策略约束；Worker 不能访问页面的 DOM。
 
 Worker 使计算能在另一线程运行，但不意味着主线程中的 JavaScript 变成多线程；双方需要通过消息或可转移对象协作。
+
+## 面试复盘要点
+
+下面是一份按机制归纳的快速复盘清表。它与前面的专题内容互为索引：需要理解原理时回到对应题目，需要快速回忆时可以直接检查下面的结论。
+
+### 一、事件循环与异步
+
+**执行模型：** 一次循环执行一个任务（初始任务是整段 `script`）→ 清空微任务队列 → 浏览器必要时渲染 → 取下一个宏任务。
+
+- JavaScript 是单线程的；异步是宿主环境（浏览器或 Node.js）把任务回调放入队列，Event Loop 再调度主线程执行。
+- 整段 `script` 本身就是第一个宏任务。同步代码执行完后，先清空微任务，再进入下一个宏任务。
+- 微任务按入队顺序执行，执行过程中新加入的微任务会继续留在本轮，直到队列为空。
+- 浏览器中常见宏任务包括 `script`、定时器、I/O、UI 事件、`MessageChannel` 等；常见微任务包括 `Promise.then/catch/finally`、`queueMicrotask`、`MutationObserver`。
+- `setTimeout(fn, 0)` 不表示立即执行。它至少要等当前任务和微任务清空，实际时间受定时器最小延迟和线程负载影响。
+- Promise 的执行器是同步的，只有其后续回调（如 `.then`）进入微任务队列。
+- `async` 函数在第一个 `await` 之前按同步代码执行；遇到 `await` 后，后续部分会在恢复执行时作为微任务。
+- `await` 后面的代码相当于放入微任务，但要和具体宿主的调度顺序一起分析；无限制造微任务可能使后续宏任务和页面渲染饿死。
+- Node.js 的事件循环分为 timers、poll、check 等阶段，并有额外的 `process.nextTick` 队列；`process.nextTick` 优先级高于 Promise 微任务。
+- `setImmediate` 和 `setTimeout(0)` 的先后在主模块中不固定，在 I/O 回调中通常先执行 `setImmediate`。
+
+经典输出题：
+
+```js
+console.log(1);
+setTimeout(() => console.log(2), 0);
+Promise.resolve().then(() => console.log(3));
+console.log(4);
+
+// 1、4、3、2
+```
+
+`await readline()` 遇到异步读取时会让出当前执行流；读取完成后继续执行的代码进入微任务。它本质上没有多线程执行 JavaScript，同一时刻仍只有一个调用栈在运行。
+
+#### Promise 的状态与链式调用
+
+- 三种状态：`pending`、`fulfilled`、`rejected`。状态敲定后不可改变。
+- `.then` 通常返回一个新 Promise；回调返回普通值就兑现，抛出异常就拒绝，返回 Promise 则采用该 Promise 的状态。
+- 拒绝会沿链传递，直到遇到能处理它的 `.catch` 或另一个拒绝处理器。
+- `.finally` 不接收上游结果，因此一般透传原结果；如果回调抛错，或返回被拒绝的 Promise，则会覆盖原状态。
+- 链式调用中的新 `.then` 等前一步回调执行完并入队，不要只按代码书写顺序直接确定微任务顺序。
+
+### 二、`this` 指向
+
+绑定优先级为：`new` > 显式绑定（`call` / `apply` / `bind`）> 方法调用 > 默认绑定。规则的核心是找调用点由哪一个接收者提供 `this`。
+
+- 普通方法调用：`obj.method()` 中，`method` 的 `this` 通常指向 `obj`。
+- 方法被取出：`const fn = obj.method; fn()` 会丢失接收者。非严格模式普通函数的默认绑定指向全局对象，严格模式指向 `undefined`。
+- 显式绑定：`call` 逐个传参，`apply` 以数组传参，`bind` 返回硬绑定函数，三者都不改变箭头函数的 `this`。
+- `bind` 后再通过 `call` / `apply` 调用仍不能覆盖绑定；唯一例外是将绑定的可构造函数用于 `new`，此时 `this` 指向新建实例。
+- 箭头函数没有自己的 `this`，它读取定义位置外层作用域中的 `this`，并且不能被后续显式绑定改变。
+- 对象字面量 `{}` 不创建词法作用域。`{ say: () => this.name }` 中的箭头函数不会把对象作为 `this`；它读取外层作用域的 `this`。
+- 在事件回调中先保存箭头函数中的外层 `this`，或使用 `bind`，不要假定回调接收者就是目标对象。
+
+**手写判断模板：**
+
+```js
+function callContext(priority) {
+  console.log(priority, this);
+}
+
+const receiver = { name: 'receiver' };
+callContext.call(receiver, '显式绑定');
+callContext.apply(receiver, ['显式绑定']);
+const bound = callContext.bind(receiver, '绑定');
+bound();
+
+const arrow = () => console.log(this);
+arrow.call(receiver); // 仍读取外层 this
+```
+
+### 三、闭包与作用域
+
+- 闭包是函数能够访问其词法作用域中的变量，即使该函数在定义它的作用域之外执行。
+- 闭包保存的是变量绑定，不是变量值的快照。多个函数可共享同一个变量引用。
+- `var i` 在循环结束后被所有回调共享，因此回调依次读取到同一个最终值。使用 `let` 可以让每次迭代拥有独立绑定。
+- 可以用 IIFE 创建每次迭代的局部作用域，也可以用 `bind` 预设参数、或直接使用 `forEach` / `map` 等回调参数传递值。
+- 闭包不等于内存泄漏。只有闭包长期存活且持续持有大对象、监听器、定时器或 DOM 时，才会阻止资源回收。
+- 清理监听器和定时器是常见修复手段；需要弱关联对象元数据时可使用 `WeakMap` / `WeakSet`。
+
+```js
+for (var i = 0; i < 3; i++) {
+  setTimeout(() => console.log(i)); // 3 3 3
+}
+
+for (let i = 0; i < 3; i++) {
+  setTimeout(() => console.log(i)); // 0 1 2
+}
+```
+
+### 四、变量声明与冻结
+
+- `var`：函数作用域；声明提升到作用域顶部，初始化为 `undefined`，赋值不会提升。
+- `let` / `const`：块级作用域；声明前处于 TDZ（暂时性死区），读取或写入会抛出 `ReferenceError`。
+- `const` 只限制变量绑定不能重新赋值，不限制对象内部属性修改。严格模式和非严格模式下，重新给 `const` 赋值都会抛出 `TypeError`。
+- 对象字面量中的属性与变量绑定是不同概念；冻结绑定也不等于冻结对象。
+- `Object.freeze` 是浅冻结。被冻结对象已有的自有属性不可再修改或配置；冻结 `Map` 只冻结 Map 对象壳，并不会冻结内部条目。
+- 非严格模式下修改被冻结属性会静默失败，严格模式会抛出 `TypeError`。
+- 嵌套对象需要递归冻结；循环引用对象需要使用已访问集合避免无限递归。
+
+### 五、原型与继承
+
+- `prototype` 是构造函数的属性；实例对象通过内部原型访问到它。推荐使用 `Object.getPrototypeOf()` 和 `Object.create()`，不要依赖 `__proto__`。
+- 原型链终点是 `Object.prototype.__proto__ === null`。
+- `hasOwnProperty` / `Object.hasOwn` 判断是否为自有属性，原型上的同名属性不会被计算为自有属性。
+- 继承演进：原型链继承会共享引用属性 → 借用构造函数拿不到原型方法 → 组合继承重复执行父构造函数 → 寄生组合继承用 `Object.create` 建立原型并只调用一次父构造函数 → `class extends` 内部使用类似机制。
+- `class` 的 `super` 只能在派生类构造函数中使用，调用前不能访问 `this`；派生类构造函数未显式 `super()` 时不能返回自身构造的实例。
+- 原型链污染应从不可信合并开始避免：拒绝 `__proto__`、`constructor`、`prototype` 等危险键；字典数据可使用 `Object.create(null)`，写入前检查自有属性。
+
+若 `Animal.call(this, name)` 被去掉，问题不是 `this` 指向错误，而是父类构造逻辑没有执行，实例的 `name`、`tags` 等初始化字段不会被创建。
+
+### 六、类型与数据
+
+- JavaScript 基本类型包括 `string`、`number`、`boolean`、`undefined`、`null`、`bigint` 和 `symbol`；对象和函数属于引用类型。
+- `typeof null === 'object'` 是历史遗留，判断 `null` 应使用 `value === null`。
+- 数组使用 `Array.isArray(value)` 判断；对象、函数、日期等类型不能只靠 `typeof` 区分，必要时结合原型或 `Object.prototype.toString.call`。
+- `typeof` 总是返回字符串。对于未声明变量，直接读取会抛 `ReferenceError`；`typeof undeclaredName` 仍有特殊的安全行为并返回 `"undefined"`。
+- 默认参数只有参数值为 `undefined` 时才应用默认值，传入 `null` 不触发。
+- `JSON.stringify` 会忽略对象属性中的 `undefined`、函数和 Symbol；数组中的 `undefined`、函数和 Symbol 会变成 `null`；而 `null` 会保留。
+- `Symbol()` 每次创建唯一的 Symbol；`Symbol.for(key)` 使用全局注册表，相同 key 返回相同 Symbol。
+- Symbol 属性不等于私有属性：可以通过 `Object.getOwnPropertySymbols` 和 `Reflect.ownKeys` 被发现。真正的私有字段应使用 `#field`。
+- 浅拷贝（如展开语法、`Object.assign`）复制的是基本类型值和引用地址，不会递归复制对象。
+- `structuredClone` 支持 `Date`、`Map`、`Set` 和循环引用，但不支持函数和 Symbol，丢失自定义类原型。
+- `JSON.parse(JSON.stringify())` 会丢失 `undefined`、函数和 Symbol；`Date` 变字符串，`Map` / `Set` 变成普通对象，循环引用会抛错。
+
+### 七、`Proxy`、`Generator` 与弱集合
+
+#### Proxy
+
+- `Proxy` 包装目标对象，拦截访问、赋值、删除、定义属性等内部操作；它不是目标对象本身，目标的引用仍绕过拦截器。
+- 能力：动态校验、只读字段、数据跟踪、缓存、数据绑定和属性访问日志。
+- 使用拦截器时优先配合 `Reflect` 保留默认行为，并正确传入原始 `receiver`。例如 `Reflect.set(target, key, value, receiver)` 会得到布尔型结果。
+- Proxy 的不变量保护不可配置且不可写的数据属性、不可配置且无 getter 的访问器：代理不能报告与目标冲突的值或行为。
+- 私有字段（`#field`）由类内部机制管理。代理对象在访问私有字段时可能因为接收者不是原始实例而抛错，此时应让正确的原始实例接收调用，或由实例方法内部处理私有状态。
+- `Proxy.revocable()` 可以在后续通过 `revoke()` 断开代理与目标的操作；撤销后继续访问代理会抛出 `TypeError`。
+
+```js
+const target = { count: 0 };
+const proxy = new Proxy(target, {
+  get(current, key, receiver) {
+    console.log('读取', key);
+    return Reflect.get(current, key, receiver);
+  },
+  set(current, key, value, receiver) {
+    if (typeof value !== 'number') return false;
+    return Reflect.set(current, key, value, receiver);
+  },
+});
+
+proxy.count = 1;
+target.count = 2; // 绕过代理
+```
+
+#### Generator 与 `yield`
+
+- `function*` 定义生成器，调用后不会立即执行函数体，而是返回迭代器。
+- `next()` 让执行到下一个 `yield`，并返回 `{ value, done }`；`done: true` 表示生成器执行结束。
+- `next(value)` 的参数会成为上一个暂停的 `yield` 表达式的值。首次调用 `next()` 的参数通常不会进入函数体。
+- `yield*` 委托给另一个可迭代对象，箭头函数不能直接作为生成器。
+- 常见用途包括惰性序列、分步迭代和把异步流程写成顺序结构；业务异步控制应优先考虑可读性更好的 `async/await`。
+
+```js
+function* produce() {
+  const first = yield '第一次';
+  const second = yield `收到：${first}`;
+  return second;
+}
+
+const iterator = produce();
+iterator.next();
+iterator.next('甲');
+iterator.next('乙');
+// 最后一次恢复后 done 为 true
+```
+
+#### WeakMap 与 WeakSet
+
+- `WeakMap` 的键必须是对象，值可以是任意类型；它弱引用键，不阻止对象被垃圾回收。
+- 弱集合不可遍历，没有 `size`，适合保存对象元数据、缓存或关联关系，避免依赖全局强引用造成泄漏。
+- `Map` 强引用键；在长期缓存中，如果外部已不再使用对象，仍可能因为缓存而不能回收。
+- `WeakSet` 只能保存对象，主要用于标记对象或管理状态，不能枚举其中的对象。
+
+### 八、模块系统
+
+| 对比项 | ES Module | CommonJS |
+| --- | --- | --- |
+| 加载时机 | 静态，编译阶段分析，可 tree-shaking | 运行时，`require()` 可写在条件或函数中 |
+| 导出绑定 | 活绑定，导出的值更新后其他模块可同步读取 | 一般导出值快照；对象仍共享引用 |
+| 导入绑定 | 对外只读，不允许重新赋值 | 持有 `exports` 的当前导出值或对象引用 |
+| 解析方式 | URL、模块规范和文件类型影响加载 | 基于当前模块的绝对或相对路径解析 |
+
+ESM 的导入绑定是只读的，但绑定指向导出模块中的变量，因此导出变量更新后导入方读取到新值。CommonJS 是运行时模块包装，并通过 `require` 缓存模块；对基本类型进行导出后，导出模块修改局部变量不会自动同步到已取得的值。
+
+### 九、必须能默写的手写题
+
+#### 防抖
+
+```js
+function debounce(fn, delay) {
+  let timer;
+
+  function debounced(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  }
+
+  debounced.cancel = () => clearTimeout(timer);
+  return debounced;
+}
+```
+
+防抖是在事件触发后等待一段时间再执行；期间再次触发会重置计时。常用于搜索联想。节流则是在一段时间内最多执行一次，常用于滚动和拖拽。
+
+#### Promise.all
+
+```js
+function promiseAll(iterable) {
+  return new Promise((resolve, reject) => {
+    const items = Array.from(iterable);
+    const results = new Array(items.length);
+    let completed = 0;
+
+    if (items.length === 0) {
+      resolve(results);
+      return;
+    }
+
+    items.forEach((item, index) => {
+      Promise.resolve(item).then((value) => {
+        results[index] = value;
+        if (++completed === items.length) resolve(results);
+      }, reject);
+    });
+  });
+}
+```
+
+- 使用 `Promise.resolve` 统一处理普通值和 thenable。
+- 按索引保存结果，保证顺序与输入一致。
+- 任意拒绝立即拒绝；计数器只在成功后增加。
+- 空数组立即兑现 `[]`。
+
+#### Promise.race
+
+```js
+function promiseRace(iterable) {
+  return new Promise((resolve, reject) => {
+    for (const item of iterable) {
+      Promise.resolve(item).then(resolve, reject);
+    }
+  });
+}
+```
+
+`race` 会采用最先敲定的 Promise，无论先敲定的是成功还是拒绝。空可迭代对象不会执行任何处理，因此返回 Promise 会永久处于 pending。
+
+#### 深冻结（含循环引用）
+
+```js
+function deepFreeze(value, seen = new WeakSet()) {
+  if (
+    value === null
+    || (typeof value !== 'object' && typeof value !== 'function')
+  ) {
+    return value;
+  }
+
+  if (seen.has(value)) return value;
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    deepFreeze(value[key], seen);
+  }
+  return Object.freeze(value);
+}
+```
+
+递归检查属性值而不是只检查属性名，先检查循环引用，再冻结对象。该实现仍需根据对象类型处理只读的自有不可配置属性等边界行为；在冻结前读取 getter 或其他带副作用的属性可能产生额外结果。
+
+### 十、复盘时需要重点检查的矛盾点
+
+1. **解释原因要说机制**：不要只说“变量提升”“this 指向错误”，而要说明绑定、作用域、微任务入队或原型查找发生在哪一步。
+2. **输出题要画调用栈与队列**：区分同步代码、微任务、宏任务，以及链式 Promise 何时入队。
+3. **手写题不能跳过**：至少能独立写出防抖、`Promise.all`、`Promise.race`；运行时可以用断言验证空数组、拒绝和顺序。
+4. **写完检查前后是否矛盾**：比如 `typeof null` 是 `"object"`、浅拷贝共享引用、生成器结束后 `done` 恒为 `true`，这些细节容易在重述时写错。
